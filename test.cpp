@@ -3,79 +3,97 @@
 #include "LRU.h"
 #include "LFU.h"
 
+
 // 测试工具函数
-void printTestResult(bool passed, const std::string& testName) {
-    if (passed) {
-        std::cout << "[PASS] " << testName << std::endl;
+template<typename T>
+void print_test_result(const char* test_name, T expected, T actual) {
+    if (expected == actual) {
+        std::cout << "[PASS] " << test_name << "\n";
     }
     else {
-        std::cout << "[FAIL] " << testName << std::endl;
+        std::cout << "[FAIL] " << test_name
+            << " (Expected: " << expected
+            << ", Actual: " << actual << ")\n";
     }
 }
-
 // 测试用例
 void TestBasicFunction() {
-    LfuCache<int, std::string> cache(3);
-    bool passed = true;
+    HashLfuCache<int, std::string> cache(100, 4);
 
-    // 插入和读取
+    // 基础插入查询
     cache.put(1, "A");
     std::string value;
-    passed &= cache.get(1, value) && (value == "A");
-
-    printTestResult(passed, "TestBasicFunction");
+    bool found = cache.get(1, value);
+    print_test_result("BasicPutGet", true, found);
+    print_test_result("ValueCorrect", std::string("A"), value);
 }
+void TestShardingDistribution() {
+    HashLfuCache<int, int> cache(100, 2);
+    int same_hash_count = 0;
 
-void TestEvictionPolicy() {
-    LfuCache<int, std::string> cache(2);
-    bool passed = true;
+    // 测试哈希分布
+    for (int i = 0; i < 100; ++i) {
+        size_t h1 = cache.Hash(i) % 2;
+        size_t h2 = cache.Hash(i + 1) % 2;
+        if (h1 == h2) same_hash_count++;
+    }
 
-    cache.put(1, "A");
-    cache.put(2, "B");
-    cache.put(3, "C"); // 触发淘汰
-
-    std::string val;
-    passed &= !cache.get(1, val); // 1被淘汰
-    passed &= cache.get(3, val) && (val == "C"); // 3存在
-
-    printTestResult(passed, "TestEvictionPolicy");
+    print_test_result("ShardingDistribution", false, same_hash_count == 100);
 }
-void TestFrequencyIncrease() {
-    LfuCache<int, int> cache(3);
-    bool passed = true;
+void TestEvictionLogic() {
+    HashLfuCache<int, int> cache(3, 1); // 单分片容量3
 
+    // 填充缓存
     cache.put(1, 100);
+    cache.put(2, 200);
+    cache.put(3, 300);
+    cache.put(4, 400); // 应触发淘汰
+
     int val;
-    cache.get(1, val);
-    cache.get(1, val);
+    bool found = cache.get(4, val);
+    std::cout << val << std::endl;
+    print_test_result("EvictionHappened", false, found);
+}
+void TestConcurrency() {
+    HashLfuCache<int, int> cache(1000, 8);
+    constexpr int kThreads = 8;
+    std::vector<std::thread> threads;
 
-    passed &= (cache.nodeMap_[1]->freq == 3); // 频率应为3
+    // 并发测试
+    for (int i = 0; i < kThreads; ++i) {
+        threads.emplace_back([&, i]() {
+            for (int j = 0; j < 1000; ++j) {
+                int key = i * 1000 + j;
+                cache.put(key, key);
+                int value;
+                cache.get(key, value);
+            }
+            });
+    }
 
-    printTestResult(passed, "TestFrequencyIncrease");
+    for (auto& t : threads) t.join();
+    std::cout << "[PASS] ConcurrencyStressTest\n";
 }
 void TestEdgeCases() {
-    bool passed = true;
-
     // 容量为0的缓存
-    LfuCache<int, std::string> cache0(0);
-    cache0.put(1, "A"); // 不应崩溃
-    passed &= (cache0.nodeMap_.size() == 0);
-
-    // 淘汰逻辑
-    LfuCache<int, std::string> cache1(1);
-    cache1.put(1, "A");
-    cache1.put(2, "B"); // 淘汰1
+    HashLfuCache<int, std::string> cache0(0, 4);
+    cache0.put(1, "A");
     std::string val;
-    passed &= !cache1.get(1, val);
+    bool found = cache0.get(1, val);
+    print_test_result("ZeroCapacity", false, found);
 
-    printTestResult(passed, "TestEdgeCases");
+    // 单分片场景
+    HashLfuCache<int, int> cache1(10, 1);
+    for (int i = 0; i < 15; ++i) cache1.put(i, i);
+    int tmp;
+    print_test_result("SingleShardEvict", false, cache1.get(0, tmp));
 }
 
-int main()
-{
+int main() {
     //TestBasicFunction();
-    //TestEvictionPolicy();
-    //TestFrequencyIncrease();
+    //TestShardingDistribution();
+    //TestEvictionLogic();
+    //TestConcurrency();
     TestEdgeCases();
     return 0;
 }

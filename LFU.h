@@ -264,3 +264,58 @@ void LfuCache<Key, Value>::decreaseFreqNum(int num)
 	if (nodeMap_.empty()) curAverageNum_ = 0;
 	else curAverageNum_ = curTotalNum_ / nodeMap_.size();
 }
+
+
+template<typename Key,typename Value>
+class HashLfuCache
+{
+public:
+	HashLfuCache(size_t capacity, int sliceNum, int maxAverageNum = 10)
+		:capacity_(capacity),
+		sliceNum_(sliceNum > 0 ? sliceNum : std::thread::hardware_concurrency())
+	{
+		size_t sliceSize = std::ceil(capacity_ / static_cast<double>(sliceNum_));// 每个lfu分片容量
+		for (int i = 0; i < sliceNum_; i++)
+		{
+			lfuSliceCaches_.emplace_back(new LfuCache<Key, Value>(sliceSize, maxAverageNum));
+		}
+	}
+	void put(Key key, Value value)
+	{
+		// 根据 key 找出相应的 lfu 分片
+		size_t sliceIndex = Hash(key) % sliceNum_;
+		return lfuSliceCaches_[sliceIndex]->put(key, value);
+	}
+
+	bool get(Key key, Value& value)
+	{
+		// 根据 key 找出相应的 lfu 分片
+		size_t sliceIndex = Hash(key) % sliceNum_;
+		return lfuSliceCaches_[sliceIndex]->get(key, value);
+	}
+	Value get(Key key)
+	{
+		Value value;
+		get(key, value);
+		return value;
+	}
+	// 清除缓存
+	void purge()
+	{
+		for (auto& lfuSliceCache : lfuSliceCaches_)
+		{
+			lfuSliceCache->purge();
+		}
+	}
+//private:
+	// 将 key 值计算成哈希值
+	size_t Hash(Key key)
+	{
+		std::hash<Key> hashFunc;
+		return hashFunc(key);
+	}
+private:
+	size_t capacity_; // 缓存总容量
+	int sliceNum_; // 缓存分片数量
+	std::vector<std::unique_ptr<LfuCache<Key, Value>>> lfuSliceCaches_; // 缓存lfu分片容器
+};
