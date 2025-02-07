@@ -3,6 +3,8 @@
 
 namespace FgCache
 {
+
+
 template<typename Key,typename Value>
 class ArcNode
 {
@@ -26,7 +28,7 @@ public:
 	{
 		return value_;
 	}
-	size_t getAccessCount()
+	size_t getAccessCount() const
 	{
 		return accessCount_;
 	}
@@ -41,6 +43,6 @@ public:
 		++accessCount_;
 	}
 	template<typename K, typename V> friend class ArcLruPart;
-	template<typename K, typename V> friend class ArcLfuPary;
+	template<typename K, typename V> friend class ArcLfuPart;
 };
 }
