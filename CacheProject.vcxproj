@@ -139,7 +139,9 @@
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>
+    <ClInclude Include="ArcCache.h" />
     <ClInclude Include="ArcCacheNode.h" />
+    <ClInclude Include="ArcLfuPart.h" />
     <ClInclude Include="ArcLruPart.h" />
     <ClInclude Include="CachePolicy.h" />
     <ClInclude Include="LFU.h" />

@@ -1,172 +1,234 @@
 #include <iostream>
 #include <cassert>
 #include <thread>
+#include <chrono>
+#include <iomanip>
+#include <random>
+#include <algorithm>
+#include <array>
+#include <string>
 #include "LRU.h"
 #include "LFU.h"
 #include "ArcCacheNode.h"
 #include "ArcLruPart.h"
-
+#include "ArcLfuPart.h"
+#include "ArcCache.h"
+#include "CachePolicy.h"
 using namespace FgCache;
 
-// 测试插入和获取功能
-void testPutAndGet()
+
+class Timer {
+public:
+    Timer() : start_(std::chrono::high_resolution_clock::now()) {}
+
+    double elapsed() {
+        auto now = std::chrono::high_resolution_clock::now();
+        return std::chrono::duration_cast<std::chrono::milliseconds>(now - start_).count();
+    }
+
+private:
+    std::chrono::time_point<std::chrono::high_resolution_clock> start_;
+};
+
+// 辅助函数：打印结果
+void printResults(const std::string& testName, int capacity,
+    const std::vector<int>& get_operations,
+    const std::vector<int>& hits)
 {
-    ArcLruPart<std::string, std::string> cache(3, 3);
-
-    // 插入键值对
-    cache.put("key1", "value1");
-    cache.put("key2", "value2");
-    cache.put("key3", "value3");
-
-    std::string value;
-    bool shouldTransform;
-
-    // 获取键值对
-    if (cache.get("key1", value, shouldTransform))
-    {
-        std::cout << "Test Put/Get: key1 found, value: " << value << ", shouldTransform: " << shouldTransform << std::endl;
-    }
-    else
-    {
-        std::cout << "Test Put/Get: key1 not found (unexpected)" << std::endl;
-    }
-
-    // 测试缓存容量限制
-    cache.put("key4", "value4");
-
-    // 验证 key2 被驱逐
-    if (!cache.get("key2", value, shouldTransform))
-    {
-        std::cout << "Test Put/Get: key2 evicted successfully" << std::endl;
-    }
+    std::cout << "缓存大小: " << capacity << std::endl;
+    std::cout << "LRU - 命中率: " << std::fixed << std::setprecision(2)
+        << (100.0 * hits[0] / get_operations[0]) << "%" << std::endl;
+    std::cout << "LFU - 命中率: " << std::fixed << std::setprecision(2)
+        << (100.0 * hits[1] / get_operations[1]) << "%" << std::endl;
+    std::cout << "ARC - 命中率: " << std::fixed << std::setprecision(2)
+        << (100.0 * hits[2] / get_operations[2]) << "%" << std::endl;
 }
-// 测试驱逐和幽灵缓存功能
-void testEvictionAndGhostCache()
-{
-    ArcLruPart<std::string, std::string> cache(3, 3);
+void testHotDataAccess() {
+    std::cout << "\n=== 测试场景1：热点数据访问测试 ===" << std::endl;
 
-    cache.put("key1", "value1");
-    cache.put("key2", "value2");
-    cache.put("key3", "value3");
+    const int CAPACITY = 10;
+    const int OPERATIONS = 100000;
+    const int HOT_KEYS = 3;
+    const int COLD_KEYS = 30;
 
-    cache.put("key4", "value4"); // 驱逐 key1 到幽灵缓存
-    cache.put("key5", "value5"); // 驱逐 key2 到幽灵缓存
+    FgCache::FLruCache<int, std::string> lru(CAPACITY);
+    FgCache::LfuCache<int, std::string> lfu(CAPACITY);
+    //KamaCache::KLfuCache<int, std::string> lfu(CAPACITY);
+    FgCache::ArcCache<int, std::string> arc(CAPACITY);
 
-    std::string value;
-    bool shouldTransform;
+    std::random_device rd;
+    std::mt19937 gen(rd());
 
-    // 检查 key1 是否在幽灵缓存中
-    if (cache.checkGhost("key1"))
-    {
-        std::cout << "Test Eviction/GhostCache: key1 found in ghost cache" << std::endl;
-    }
+    std::array<FgCache::FgCachePolicy<int, std::string>*, 3> caches = { &lru, &lfu, &arc };
+    std::vector<int> hits(3, 0);
+    std::vector<int> get_operations(3, 0);
 
-    // 验证 key1 的驱逐
-    if (!cache.get("key1", value, shouldTransform))
+    // 先进行一系列put操作
+    for (int i = 0; i < caches.size(); ++i) 
     {
-        std::cout << "Test Eviction/GhostCache: key1 successfully evicted from main cache" << std::endl;
-    }
+        for (int op = 0; op < OPERATIONS; ++op)
+        {
+            int key;
+            if (op % 100 < 40) 
+            {  // 40%热点数据
+                key = gen() % HOT_KEYS;
+            }
+            else 
+            {  // 60%冷数据
+                key = HOT_KEYS + (gen() % COLD_KEYS);
+            }
+            std::string value = "value" + std::to_string(key);
+            caches[i]->put(key, value);
+        }
 
-    // 重新插入 key1，触发幽灵缓存的驱逐
-    //   3 4 5
-    //  1 2
-    cache.put("key1", "value1");
-
-    // 现在幽灵缓存中有 key2 和 key3
-    // 验证 key2 是否仍然在幽灵缓存中
-    if (cache.checkGhost("key2"))
-    {
-        std::cout << "Test Eviction/GhostCache: key2 found in ghost cache (still present)" << std::endl;
+        // 然后进行随机get操作
+        for (int get_op = 0; get_op < OPERATIONS / 2; ++get_op) 
+        {
+            int key;
+            if (get_op % 100 < 40) 
+            {  // 40%概率访问热点
+                key = gen() % HOT_KEYS;
+            }
+            else
+            {  // 60%概率访问冷数据
+                key = HOT_KEYS + (gen() % COLD_KEYS);
+            }
+            std::string result;
+            get_operations[i]++;
+            if (caches[i]->get(key, result))
+            {
+                hits[i]++;
+            }
+        }
     }
-    else
-    {
-        std::cout << "Test Eviction/GhostCache: key2 erroneously evicted from ghost cache" << std::endl;
-    }
-
-    if (cache.checkGhost("key1"))
-    {
-        std::cout << "Test Eviction/GhostCache: key1 found in ghost cache (still present)" << std::endl;
-    }
-    else
-    {
-        std::cout << "Test Eviction/GhostCache: key1 erroneously evicted from ghost cache" << std::endl;
-    }
-    if (cache.checkGhost("key3"))
-    {
-        std::cout << "Test Eviction/GhostCache: key3 found in ghost cache (still present)" << std::endl;
-    }
-    else
-    {
-        std::cout << "Test Eviction/GhostCache: key3 erroneously evicted from ghost cache" << std::endl;
-    }
+    printResults("热点数据访问测试", CAPACITY, get_operations, hits);
 }
 
+void testLoopPattern() {
+    std::cout << "\n=== 测试场景2：循环扫描测试 ===" << std::endl;
 
+    const int CAPACITY = 3;
+    const int LOOP_SIZE = 200;
+    const int OPERATIONS = 50000;
 
-// 测试容量调整功能
-void testCapacityAdjustment()
-{
-    ArcLruPart<std::string, std::string> cache(2, 3);
+    FgCache::FLruCache<int, std::string> lru(CAPACITY);
+    FgCache::LfuCache<int, std::string> lfu(CAPACITY);
+    FgCache::ArcCache<int, std::string> arc(CAPACITY);
 
-    cache.put("key1", "value1");
-    cache.put("key2", "value2");
+    std::array<FgCache::FgCachePolicy<int, std::string>*, 3> caches = { &lru, &lfu, &arc };
+    std::vector<int> hits(3, 0);
+    std::vector<int> get_operations(3, 0);
 
-    // 增加容量
-    cache.increaseCapacity();
-    std::cout << "Test Capacity Adjustment: Capacity increased to 3" << std::endl;
+    std::random_device rd;
+    std::mt19937 gen(rd());
 
-    // 插入新键值对，不会触发驱逐
-    cache.put("key3", "value3");
+    // 先填充数据
+    for (int i = 0; i < caches.size(); ++i) {
+        for (int key = 0; key < LOOP_SIZE * 2; ++key) {
+            std::string value = "loop" + std::to_string(key);
+            caches[i]->put(key, value);
+        }
 
-    std::string value;
-    bool shouldTransform;
+        // 然后进行访问测试
+        int current_pos = 0;
+        for (int op = 0; op < OPERATIONS; ++op) {
+            int key;
+            if (op % 100 < 70) {  // 70%顺序扫描
+                key = current_pos;
+                current_pos = (current_pos + 1) % LOOP_SIZE;
+            }
+            else if (op % 100 < 85) {  // 15%随机跳跃
+                key = gen() % LOOP_SIZE;
+            }
+            else {  // 15%访问范围外数据
+                key = LOOP_SIZE + (gen() % LOOP_SIZE);
+            }
 
-    if (cache.get("key1", value, shouldTransform))
-    {
-        std::cout << "Test Capacity Adjustment: key1 found after capacity increase" << std::endl;
+            std::string result;
+            get_operations[i]++;
+            if (caches[i]->get(key, result)) {
+                hits[i]++;
+            }
+        }
     }
 
-    // 减少容量
-    cache.decreaseCapacity();
-    std::cout << "Test Capacity Adjustment: Capacity decreased back to 2" << std::endl;
-
-    // 插入新键值对，触发驱逐
-    cache.put("key4", "value4");
-
-    if (!cache.get("key2", value, shouldTransform))
-    {
-        std::cout << "Test Capacity Adjustment: key2 evicted after capacity decrease" << std::endl;
-    }
+    printResults("循环扫描测试", CAPACITY, get_operations, hits);
 }
-// 测试访问计数和转换门槛
-void testAccessCountAndThreshold()
-{
-    ArcLruPart<std::string, std::string> cache(3, 2);
 
-    cache.put("key1", "value1");
-    cache.put("key2", "value2");
+void testWorkloadShift() {
+    std::cout << "\n=== 测试场景3：工作负载剧烈变化测试 ===" << std::endl;
 
-    // 访问 key1 两次
-    std::string value;
-    bool shouldTransform;
-    cache.get("key1", value, shouldTransform);
-    cache.get("key1", value, shouldTransform);
+    const int CAPACITY = 4;
+    const int OPERATIONS = 80000;
+    const int PHASE_LENGTH = OPERATIONS / 5;
 
-    if (shouldTransform)
-    {
-        std::cout << "Test AccessCount/Threshold: key1 shouldTransform returns true" << std::endl;
+    FgCache::FLruCache<int, std::string> lru(CAPACITY);
+    FgCache::LfuCache<int, std::string> lfu(CAPACITY);
+    FgCache::ArcCache<int, std::string> arc(CAPACITY);
+
+    std::random_device rd;
+    std::mt19937 gen(rd());
+    std::array<FgCache::FgCachePolicy<int, std::string>*, 3> caches = { &lru, &lfu, &arc };
+    std::vector<int> hits(3, 0);
+    std::vector<int> get_operations(3, 0);
+
+    // 先填充一些初始数据
+    for (int i = 0; i < caches.size(); ++i) {
+        for (int key = 0; key < 1000; ++key) {
+            std::string value = "init" + std::to_string(key);
+            caches[i]->put(key, value);
+        }
+
+        // 然后进行多阶段测试
+        for (int op = 0; op < OPERATIONS; ++op) {
+            int key;
+            // 根据不同阶段选择不同的访问模式
+            if (op < PHASE_LENGTH) {  // 热点访问
+                key = gen() % 5;
+            }
+            else if (op < PHASE_LENGTH * 2) {  // 大范围随机
+                key = gen() % 1000;
+            }
+            else if (op < PHASE_LENGTH * 3) {  // 顺序扫描
+                key = (op - PHASE_LENGTH * 2) % 100;
+            }
+            else if (op < PHASE_LENGTH * 4) {  // 局部性随机
+                int locality = (op / 1000) % 10;
+                key = locality * 20 + (gen() % 20);
+            }
+            else {  // 混合访问
+                int r = gen() % 100;
+                if (r < 30) {
+                    key = gen() % 5;
+                }
+                else if (r < 60) {
+                    key = 5 + (gen() % 95);
+                }
+                else {
+                    key = 100 + (gen() % 900);
+                }
+            }
+
+            std::string result;
+            get_operations[i]++;
+            if (caches[i]->get(key, result)) {
+                hits[i]++;
+            }
+
+            // 随机进行put操作，更新缓存内容
+            if (gen() % 100 < 30) {  // 30%概率进行put
+                std::string value = "new" + std::to_string(key);
+                caches[i]->put(key, value);
+            }
+        }
     }
 
-    // 更新 key2 的值
-    cache.put("key2", "newValue2");
-
-    cache.get("key2", value, shouldTransform);
-    std::cout << "Test AccessCount/Threshold: key2's new value retrieved: " << value << std::endl;
+    printResults("工作负载剧烈变化测试", CAPACITY, get_operations, hits);
 }
-int main() {
-    //testPutAndGet();
-   // testEvictionAndGhostCache();
-   // testCapacityAdjustment();
-    testAccessCountAndThreshold();
+int main() 
+{
+    testHotDataAccess();
+    //testLoopPattern();
+   // testWorkloadShift();
     return 0;
 }

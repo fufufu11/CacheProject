@@ -30,6 +30,12 @@
     <ClInclude Include="ArcLruPart.h">
       <Filter>头文件</Filter>
     </ClInclude>
+    <ClInclude Include="ArcLfuPart.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
+    <ClInclude Include="ArcCache.h">
+      <Filter>头文件</Filter>
+    </ClInclude>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="test.cpp">
