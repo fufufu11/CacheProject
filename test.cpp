@@ -46,10 +46,10 @@ void printResults(const std::string& testName, int capacity,
 void testHotDataAccess() {
     std::cout << "\n=== 测试场景1：热点数据访问测试 ===" << std::endl;
 
-    const int CAPACITY = 10;
+    const int CAPACITY = 20;      
     const int OPERATIONS = 100000;
-    const int HOT_KEYS = 3;
-    const int COLD_KEYS = 30;
+    const int HOT_KEYS = 9;       
+    const int COLD_KEYS = 5000;     
 
     FgCache::FLruCache<int, std::string> lru(CAPACITY);
     FgCache::LfuCache<int, std::string> lfu(CAPACITY);
@@ -69,12 +69,12 @@ void testHotDataAccess() {
         for (int op = 0; op < OPERATIONS; ++op)
         {
             int key;
-            if (op % 100 < 40) 
-            {  // 40%热点数据
+            if (op % 100 < 80) 
+            {  // 80%热点数据
                 key = gen() % HOT_KEYS;
             }
             else 
-            {  // 60%冷数据
+            {  // 20%冷数据
                 key = HOT_KEYS + (gen() % COLD_KEYS);
             }
             std::string value = "value" + std::to_string(key);
@@ -85,12 +85,12 @@ void testHotDataAccess() {
         for (int get_op = 0; get_op < OPERATIONS / 2; ++get_op) 
         {
             int key;
-            if (get_op % 100 < 40) 
-            {  // 40%概率访问热点
+            if (get_op % 100 < 80) 
+            {  // 80%概率访问热点
                 key = gen() % HOT_KEYS;
             }
             else
-            {  // 60%概率访问冷数据
+            {  // 20%概率访问冷数据
                 key = HOT_KEYS + (gen() % COLD_KEYS);
             }
             std::string result;
