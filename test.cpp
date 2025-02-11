@@ -31,7 +31,7 @@ private:
 };
 
 // 辅助函数：打印结果
-void printResults(const std::string& testName, int capacity,
+void printResults(const std::string& testName, const int capacity,
     const std::vector<int>& get_operations,
     const std::vector<int>& hits)
 {
@@ -107,9 +107,10 @@ void testHotDataAccess() {
 void testLoopPattern() {
     std::cout << "\n=== 测试场景2：循环扫描测试 ===" << std::endl;
 
-    const int CAPACITY = 3;
-    const int LOOP_SIZE = 200;
-    const int OPERATIONS = 50000;
+    const int CAPACITY = 30;        // 扩大缓存容量
+    const int LOOP_SIZE = 100;      // 缩小循环规模
+    const int OPERATIONS = 50000;  // 增加操作次数
+    const int WARMUP_ROUNDS = 2;    // 预热轮数
 
     FgCache::FLruCache<int, std::string> lru(CAPACITY);
     FgCache::LfuCache<int, std::string> lfu(CAPACITY);
@@ -118,41 +119,59 @@ void testLoopPattern() {
     std::array<FgCache::FgCachePolicy<int, std::string>*, 3> caches = { &lru, &lfu, &arc };
     std::vector<int> hits(3, 0);
     std::vector<int> get_operations(3, 0);
-
-    std::random_device rd;
-    std::mt19937 gen(rd());
-
-    // 先填充数据
-    for (int i = 0; i < caches.size(); ++i) {
-        for (int key = 0; key < LOOP_SIZE * 2; ++key) {
-            std::string value = "loop" + std::to_string(key);
-            caches[i]->put(key, value);
+    // 统一预热过程
+    auto warmup = [&](auto& cache) {
+        for (int r = 0; r < WARMUP_ROUNDS; ++r) {
+            for (int i = 0; i < LOOP_SIZE; ++i) {
+                cache.put(i, "warmup");
+                if (i % 10 == 0) { // 创建热点
+                    std::string tmp;
+                    cache.get(i, tmp);
+                }
+            }
         }
+    };
 
-        // 然后进行访问测试
+    // 测试逻辑
+    auto testLogic = [&](auto& cache, int idx) {
+        std::random_device rd;
+        std::mt19937 gen(rd());
         int current_pos = 0;
+
         for (int op = 0; op < OPERATIONS; ++op) {
             int key;
-            if (op % 100 < 70) {  // 70%顺序扫描
+            if (op % 100 < 60) {       // 60%顺序扫描
                 key = current_pos;
                 current_pos = (current_pos + 1) % LOOP_SIZE;
             }
-            else if (op % 100 < 85) {  // 15%随机跳跃
+            else if (op % 100 < 80) { // 20%热点访问
+                key = gen() % 10;      // 前10个为热点
+            }
+            else if (op % 100 < 95) { // 15%随机访问
                 key = gen() % LOOP_SIZE;
             }
-            else {  // 15%访问范围外数据
+            else {                   // 5%外部数据
                 key = LOOP_SIZE + (gen() % LOOP_SIZE);
             }
 
             std::string result;
-            get_operations[i]++;
-            if (caches[i]->get(key, result)) {
-                hits[i]++;
+            if (cache.get(key, result)) {
+                hits[idx]++;
             }
+            else {
+                cache.put(key, "value");
+            }
+            get_operations[idx]++;
         }
+    };
+
+    // 执行测试
+    for (int i = 0; i < caches.size(); ++i) {
+        warmup(*caches[i]);
+        testLogic(*caches[i], i);
     }
 
-    printResults("循环扫描测试", CAPACITY, get_operations, hits);
+    printResults("优化循环测试", CAPACITY, get_operations, hits);
 }
 
 void testWorkloadShift() {
@@ -227,8 +246,8 @@ void testWorkloadShift() {
 }
 int main() 
 {
-    testHotDataAccess();
-    //testLoopPattern();
+    //testHotDataAccess();
+    testLoopPattern();
    // testWorkloadShift();
     return 0;
 }
