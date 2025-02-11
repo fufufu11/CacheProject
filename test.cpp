@@ -17,18 +17,6 @@
 using namespace FgCache;
 
 
-class Timer {
-public:
-    Timer() : start_(std::chrono::high_resolution_clock::now()) {}
-
-    double elapsed() {
-        auto now = std::chrono::high_resolution_clock::now();
-        return std::chrono::duration_cast<std::chrono::milliseconds>(now - start_).count();
-    }
-
-private:
-    std::chrono::time_point<std::chrono::high_resolution_clock> start_;
-};
 
 // 辅助函数：打印结果
 void printResults(const std::string& testName, const int capacity,
@@ -175,15 +163,16 @@ void testLoopPattern() {
 }
 
 void testWorkloadShift() {
+    
     std::cout << "\n=== 测试场景3：工作负载剧烈变化测试 ===" << std::endl;
 
-    const int CAPACITY = 4;
+    const int CAPACITY = 40;  // 增加缓存容量
     const int OPERATIONS = 80000;
     const int PHASE_LENGTH = OPERATIONS / 5;
 
     FgCache::FLruCache<int, std::string> lru(CAPACITY);
     FgCache::LfuCache<int, std::string> lfu(CAPACITY);
-    FgCache::ArcCache<int, std::string> arc(CAPACITY);
+    FgCache::ArcCache<int, std::string> arc(CAPACITY, 5);  // 增大transformThreshold，优化ARC
 
     std::random_device rd;
     std::mt19937 gen(rd());
@@ -217,10 +206,10 @@ void testWorkloadShift() {
             }
             else {  // 混合访问
                 int r = gen() % 100;
-                if (r < 30) {
+                if (r < 40) {  // 调整热点访问的比例
                     key = gen() % 5;
                 }
-                else if (r < 60) {
+                else if (r < 70) {
                     key = 5 + (gen() % 95);
                 }
                 else {
@@ -235,7 +224,7 @@ void testWorkloadShift() {
             }
 
             // 随机进行put操作，更新缓存内容
-            if (gen() % 100 < 30) {  // 30%概率进行put
+            if (gen() % 100 < 40) {  //40%概率进行put
                 std::string value = "new" + std::to_string(key);
                 caches[i]->put(key, value);
             }
@@ -246,8 +235,8 @@ void testWorkloadShift() {
 }
 int main() 
 {
-    //testHotDataAccess();
+    testHotDataAccess();
     testLoopPattern();
-   // testWorkloadShift();
+    testWorkloadShift();
     return 0;
 }
